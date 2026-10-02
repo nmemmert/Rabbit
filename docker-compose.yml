@@ -1,0 +1,41 @@
+name: warren
+services:
+  warren:
+    image: ghcr.io/nmemmert/rabbit:latest
+    container_name: warren
+    restart: unless-stopped
+    ports:
+      - "8085:3000"
+    environment:
+      - TZ=America/Chicago        # your timezone, so alerts arrive at the right local hour
+      - APP_PASSWORD=change-me    # password for the app
+      - APP_URL=                  # optional: address to open when a notification is tapped
+    volumes:
+      - /DATA/AppData/warren/data:/data
+    x-casaos:
+      envs:
+        - container: TZ
+          description: { en_us: "Timezone (e.g. America/New_York)" }
+        - container: APP_PASSWORD
+          description: { en_us: "Password to open the app" }
+        - container: APP_URL
+          description: { en_us: "Optional: address of the app, opened when you tap a notification" }
+      ports:
+        - container: "3000"
+          description: { en_us: "Web UI port" }
+      volumes:
+        - container: /data
+          description: { en_us: "Rabbit data (keep this!)" }
+x-casaos:
+  architectures: [amd64, arm64]
+  main: warren
+  index: /
+  port_map: "8085"
+  category: Utilities
+  author: nmemmert
+  developer: nmemmert
+  title: { en_us: Warren }
+  tagline: { en_us: Rabbit breeding tracker with ntfy alerts }
+  description:
+    en_us: Track rabbit breedings, nest box and kindling dates, and litters with buck/doe counts. Sends reminders through ntfy.
+  icon: https://raw.githubusercontent.com/nmemmert/Rabbit/claude/rabbit-breeding-tracker/public/icon-512.png

@@ -73,6 +73,7 @@ const publicData = () => ({ rabbits: db.rabbits, breedings: db.breedings, litter
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
+    if (url.pathname === '/api/ping') return json(res, 200, { ok: true });
     if (url.pathname.startsWith('/api/')) {
       if (!authed(req)) return json(res, 401, { error: 'unauthorized' });
       if (url.pathname === '/api/data' && req.method === 'GET') return json(res, 200, publicData());
@@ -90,7 +91,6 @@ const server = http.createServer(async (req, res) => {
       }
       return json(res, 404, { error: 'not found' });
     }
-    if (url.pathname === '/api/ping') return json(res, 200, { ok: true });
     let file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
     if (!file.startsWith(PUBLIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
