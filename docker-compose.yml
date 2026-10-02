@@ -38,4 +38,4 @@ x-casaos:
   tagline: { en_us: Rabbit breeding tracker with ntfy alerts }
   description:
     en_us: Track rabbit breedings, nest box and kindling dates, and litters with buck/doe counts. Sends reminders through ntfy.
-  icon: https://raw.githubusercontent.com/nmemmert/Rabbit/claude/rabbit-breeding-tracker/public/icon-512.png
+  icon: https://raw.githubusercontent.com/nmemmert/Rabbit/master/public/icon-512.png

@@ -1,8 +1,14 @@
 # Warren — rabbit breeding tracker
 
-A mobile-first web app (installable on iPhone) that tracks rabbits, breedings, nest-box and
-kindling dates, and litters (buck/doe counts + birth dates). A small server sends reminders
-through [ntfy](https://ntfy.sh).
+A mobile-first web app (installable on iPhone) for tracking a rabbitry. A small server stores the
+data and sends reminders through [ntfy](https://ntfy.sh).
+
+- **Rabbits** — does and bucks with breed, birth date and photos.
+- **Breedings** — log a pairing and get the palpation, nest box and kindling due dates automatically.
+- **Litters** — birth date, bucks / does / unsexed / lost counts, weaned status, notes and photos.
+- **Alerts** — ntfy reminders for palpation, nest box, due date, overdue, weaning and rebreeding.
+- **Settings** — every timing is adjustable in the app.
+- **Backup** — download or restore everything (including photos) from inside the app.
 
 ## Run it
 
@@ -22,8 +28,9 @@ No dependencies — Node 18+ only. Data lives in `data/db.json` (`/data` in Dock
 | `PORT`, `DATA_DIR` | Defaults `3000`, `./data`. |
 
 iPhone web apps can't run in the background, so alerts must come from a server that is always on
-(a VPS, a Raspberry Pi at home, Fly.io, Render with a disk, etc.). It needs HTTPS to be installed
-on the iPhone home screen.
+(a VPS, a Raspberry Pi at home, a NAS such as ZimaOS, etc.). Over HTTPS the app also works offline
+with its last saved data; over plain HTTP it still installs to the home screen but needs the server
+to be reachable.
 
 ## iPhone setup
 
