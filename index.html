@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rabbit Breeding Tracker</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --ink:#222; --muted:#777; --accent:#2f7d5b; --warn:#c0392b; --amber:#d68910; --line:#e3dfd6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1b1d1c; --card:#262928; --ink:#eee; --muted:#9a9a9a; --accent:#4fbf8b; --warn:#ff7b6b; --amber:#f0b04a; --line:#3a3e3c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 16px; background:var(--accent); color:#fff; font-size:20px; font-weight:600; }
+  nav { display:flex; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  nav button { flex:1; padding:12px 4px; border:0; background:none; color:var(--muted); font-size:15px; border-bottom:3px solid transparent; }
+  nav button.on { color:var(--accent); border-color:var(--accent); font-weight:600; }
+  main { max-width:720px; margin:0 auto; padding:12px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin:10px 0; }
+  .row { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .muted { color:var(--muted); font-size:14px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; font-size:13px; border:1px solid var(--line); }
+  .warn { color:var(--warn); font-weight:600; } .amber { color:var(--amber); font-weight:600; } .ok { color:var(--accent); font-weight:600; }
+  h2 { font-size:17px; margin:18px 0 4px; }
+  form { display:grid; gap:8px; }
+  label { display:grid; gap:2px; font-size:14px; color:var(--muted); }
+  input, select, textarea { font:inherit; padding:9px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); width:100%; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  button.btn { padding:10px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:15px; }
+  button.sec { background:none; color:var(--accent); border:1px solid var(--accent); }
+  button.del { background:none; color:var(--warn); border:0; padding:4px 8px; font-size:14px; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .empty { text-align:center; color:var(--muted); padding:24px 0; }
+</style>
+</head>
+<body>
+<header>🐇 Rabbit Breeding Tracker</header>
+<nav id="nav"></nav>
+<main id="main"></main>
+
+<script>
+// ---------- settings (days after breeding) ----------
+const GESTATION = 31;   // typical kindling day
+const NESTBOX   = 28;   // put nest box in
+const PALPATE   = 14;   // optional pregnancy check
+
+// ---------- storage ----------
+const KEY = 'rabbitTracker.v1';
+let db = { rabbits: [], breedings: [], litters: [] };
+try { db = Object.assign(db, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
+const save = () => localStorage.setItem(KEY, JSON.stringify(db));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+// ---------- date helpers (local dates, no timezone drift) ----------
+const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
+const today = () => iso(new Date());
+const diffDays = (a, b) => Math.round((parse(a) - parse(b)) / 864e5);
+const fmt = s => s ? parse(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const name = id => (db.rabbits.find(r => r.id === id) || { name: '(deleted)' }).name;
+const when = n => n === 0 ? 'today' : n > 0 ? `in ${n} day${n === 1 ? '' : 's'}` : `${-n} day${n === -1 ? '' : 's'} ago`;
+
+// ---------- views ----------
+let tab = 'home';
+const tabs = { home: 'Home', breed: 'Breedings', litters: 'Litters', rabbits: 'Rabbits' };
+
+function render() {
+  nav.innerHTML = Object.entries(tabs).map(([k, v]) => `<button class="${k === tab ? 'on' : ''}" onclick="go('${k}')">${v}</button>`).join('');
+  main.innerHTML = { home, breed, litters, rabbits }[tab]();
+}
+const go = t => { tab = t; render(); window.scrollTo(0, 0); };
+
+function pending() { return db.breedings.filter(b => b.status === 'pending'); }
+
+function home() {
+  const t = today();
+  const items = [];
+  pending().forEach(b => {
+    const bx = addDays(b.date, NESTBOX), due = addDays(b.date, GESTATION), pal = addDays(b.date, PALPATE);
+    const label = `${esc(name(b.doe))} × ${esc(name(b.buck))}`;
+    if (!b.boxIn) items.push({ date: bx, text: `Nest box for ${label}`, b });
+    items.push({ date: due, text: `Kindling due: ${label}`, b });
+    if (!b.checked) items.push({ date: pal, text: `Palpate ${label} (optional)`, b, minor: true });
+  });
+  items.sort((a, b) => a.date.localeCompare(b.date));
+  const cls = d => d < t ? 'warn' : diffDays(d, t) <= 3 ? 'amber' : 'muted';
+  let h = '<h2>Coming up</h2>';
+  h += items.length ? items.map(i => `<div class="card"><div class="row"><div>${i.text}<div class="muted">${fmt(i.date)}</div></div><div class="${cls(i.date)}">${when(diffDays(i.date, t))}</div></div></div>`).join('')
+    : '<div class="empty">Nothing scheduled. Add a breeding to get started.</div>';
+  const kits = db.litters.reduce((s, l) => s + l.males + l.females + l.unknown, 0);
+  h += `<h2>Totals</h2><div class="card muted">${db.rabbits.length} rabbits · ${db.breedings.length} breedings · ${db.litters.length} litters · ${kits} live kits</div>`;
+  h += `<div class="actions"><button class="btn sec" onclick="exportData()">Export backup</button><button class="btn sec" onclick="importFile.click()">Import backup</button><input id="importFile" type="file" accept=".json" hidden onchange="importData(this)"></div>`;
+  return h;
+}
+
+function sexOptions(sex, selected) {
+  const l = db.rabbits.filter(r => r.sex === sex && r.active !== false);
+  return l.map(r => `<option value="${r.id}" ${r.id === selected ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
+}
+
+function breed() {
+  const noRabbits = !db.rabbits.some(r => r.sex === 'doe') || !db.rabbits.some(r => r.sex === 'buck');
+  let h = '<h2>Log a breeding</h2>';
+  h += noRabbits ? '<div class="card muted">Add at least one doe and one buck on the Rabbits tab first.</div>' : `
+  <form class="card" onsubmit="addBreeding(event)">
+    <div class="two"><label>Doe<select name="doe">${sexOptions('doe')}</select></label>
+    <label>Buck<select name="buck">${sexOptions('buck')}</select></label></div>
+    <label>Date bred<input type="date" name="date" value="${today()}" required></label>
+    <button class="btn">Save breeding</button>
+  </form>`;
+  h += '<h2>History</h2>';
+  const list = [...db.breedings].sort((a, b) => b.date.localeCompare(a.date));
+  h += list.length ? list.map(b => {
+    const t = today(), due = addDays(b.date, GESTATION), bx = addDays(b.date, NESTBOX);
+    const st = b.status === 'pending' ? `<span class="tag">Pregnant?</span>` : b.status === 'kindled' ? `<span class="tag ok">Kindled</span>` : `<span class="tag warn">Not pregnant</span>`;
+    let body = `<div class="muted">Bred ${fmt(b.date)}</div>`;
+    if (b.status === 'pending') {
+      body += `<div class="muted">Nest box: ${fmt(bx)} (${when(diffDays(bx, t))})${b.boxIn ? ' ✓ in' : ''}</div>
+               <div class="muted">Due: ${fmt(due)} (${when(diffDays(due, t))})</div>
+               <div class="actions">
+                 ${b.boxIn ? '' : `<button class="btn sec" onclick="mark('${b.id}','boxIn')">Nest box put in</button>`}
+                 <button class="btn" onclick="kindle('${b.id}')">Kindled</button>
+                 <button class="btn sec" onclick="mark('${b.id}','failed')">Not pregnant</button>
+               </div>`;
+    }
+    return `<div class="card"><div class="row"><b>${esc(name(b.doe))} × ${esc(name(b.buck))}</b>${st}</div>${body}
+      <div class="actions"><button class="del" onclick="delBreeding('${b.id}')">Delete</button></div></div>`;
+  }).join('') : '<div class="empty">No breedings yet.</div>';
+  return h;
+}
+
+function litters() {
+  let h = '<h2>Litters</h2>';
+  const list = [...db.litters].sort((a, b) => b.date.localeCompare(a.date));
+  h += list.length ? list.map(l => {
+    const b = db.breedings.find(x => x.id === l.breeding);
+    const total = l.males + l.females + l.unknown;
+    return `<div class="card"><div class="row"><b>${esc(name(l.doe))}${b ? ' × ' + esc(name(b.buck)) : ''}</b><span class="muted">${fmt(l.date)}</span></div>
+      <div>${total} live: ♂ ${l.males} bucks · ♀ ${l.females} does${l.unknown ? ` · ${l.unknown} unsexed` : ''}${l.dead ? ` · <span class="warn">${l.dead} dead</span>` : ''}</div>
+      <div class="muted">Age: ${diffDays(today(), l.date)} days${b ? ` · bred ${fmt(b.date)}` : ''}</div>
+      ${l.notes ? `<div class="muted">${esc(l.notes)}</div>` : ''}
+      <div class="actions"><button class="btn sec" onclick="litterForm('${l.id}')">Edit</button><button class="del" onclick="delLitter('${l.id}')">Delete</button></div></div>`;
+  }).join('') : '<div class="empty">No litters yet. Tap “Kindled” on a breeding to record one.</div>';
+  return h;
+}
+
+function rabbits() {
+  let h = `<h2>Add rabbit</h2>
+  <form class="card" onsubmit="addRabbit(event)">
+    <div class="two"><label>Name / ID<input name="name" required></label>
+    <label>Sex<select name="sex"><option value="doe">Doe (female)</option><option value="buck">Buck (male)</option></select></label></div>
+    <div class="two"><label>Breed<input name="breed"></label><label>Birth date<input type="date" name="dob"></label></div>
+    <button class="btn">Add</button>
+  </form><h2>Herd</h2>`;
+  h += db.rabbits.length ? db.rabbits.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b><span class="tag">${r.sex === 'doe' ? '♀ Doe' : '♂ Buck'}</span></div>
+    <div class="muted">${esc(r.breed || '')}${r.dob ? ' · born ' + fmt(r.dob) : ''}</div>
+    <div class="actions"><button class="del" onclick="delRabbit('${r.id}')">Delete</button></div></div>`).join('')
+    : '<div class="empty">No rabbits yet.</div>';
+  return h;
+}
+
+// ---------- actions ----------
+function addRabbit(e) {
+  e.preventDefault(); const f = new FormData(e.target);
+  db.rabbits.push({ id: uid(), name: f.get('name').trim(), sex: f.get('sex'), breed: f.get('breed').trim(), dob: f.get('dob') });
+  save(); render();
+}
+function delRabbit(id) {
+  if (db.breedings.some(b => b.doe === id || b.buck === id) && !confirm('This rabbit has breeding records. Delete anyway?')) return;
+  if (!confirm('Delete this rabbit?')) return;
+  db.rabbits = db.rabbits.filter(r => r.id !== id); save(); render();
+}
+function addBreeding(e) {
+  e.preventDefault(); const f = new FormData(e.target);
+  db.breedings.push({ id: uid(), doe: f.get('doe'), buck: f.get('buck'), date: f.get('date'), status: 'pending', boxIn: false });
+  save(); render();
+}
+function mark(id, what) {
+  const b = db.breedings.find(x => x.id === id);
+  if (what === 'boxIn') b.boxIn = true; else b.status = what;
+  save(); render();
+}
+function delBreeding(id) {
+  if (!confirm('Delete this breeding?')) return;
+  db.breedings = db.breedings.filter(b => b.id !== id); save(); render();
+}
+function kindle(breedingId) { litterForm(null, breedingId); }
+
+function litterForm(id, breedingId) {
+  const l = id ? db.litters.find(x => x.id === id) : { date: today(), males: 0, females: 0, unknown: 0, dead: 0, notes: '', breeding: breedingId, doe: db.breedings.find(b => b.id === breedingId).doe };
+  tab = 'litters';
+  nav.innerHTML = '';
+  main.innerHTML = `<h2>${id ? 'Edit' : 'Record'} litter — ${esc(name(l.doe))}</h2>
+  <form class="card" onsubmit="saveLitter(event,'${id || ''}','${l.breeding || ''}','${l.doe}')">
+    <label>Birth date<input type="date" name="date" value="${l.date}" required></label>
+    <div class="two"><label>Bucks (♂ alive)<input type="number" min="0" name="males" value="${l.males}"></label>
+    <label>Does (♀ alive)<input type="number" min="0" name="females" value="${l.females}"></label></div>
+    <div class="two"><label>Unsexed (alive)<input type="number" min="0" name="unknown" value="${l.unknown}"></label>
+    <label>Stillborn / died<input type="number" min="0" name="dead" value="${l.dead}"></label></div>
+    <label>Notes<textarea name="notes" rows="2">${esc(l.notes)}</textarea></label>
+    <div class="actions"><button class="btn">Save</button><button type="button" class="btn sec" onclick="go('litters')">Cancel</button></div>
+  </form>`;
+}
+function saveLitter(e, id, breeding, doe) {
+  e.preventDefault(); const f = new FormData(e.target);
+  const n = k => Math.max(0, parseInt(f.get(k)) || 0);
+  const data = { date: f.get('date'), males: n('males'), females: n('females'), unknown: n('unknown'), dead: n('dead'), notes: f.get('notes').trim() };
+  if (id) Object.assign(db.litters.find(x => x.id === id), data);
+  else {
+    db.litters.push({ id: uid(), breeding, doe, ...data });
+    const b = db.breedings.find(x => x.id === breeding); if (b) b.status = 'kindled';
+  }
+  save(); go('litters');
+}
+function delLitter(id) {
+  if (!confirm('Delete this litter?')) return;
+  db.litters = db.litters.filter(l => l.id !== id); save(); render();
+}
+
+// ---------- backup ----------
+function exportData() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' }));
+  a.download = `rabbits-${today()}.json`; a.click();
+}
+function importData(input) {
+  const r = new FileReader();
+  r.onload = () => {
+    try { const d = JSON.parse(r.result); if (!d.rabbits) throw 0; if (!confirm('Replace current data with this backup?')) return; db = Object.assign({ rabbits: [], breedings: [], litters: [] }, d); save(); render(); }
+    catch (e) { alert('That file is not a valid backup.'); }
+  };
+  r.readAsText(input.files[0]);
+}
+
+render();
+</script>
+</body>
+</html>
