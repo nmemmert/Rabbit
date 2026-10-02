@@ -10,3 +10,9 @@ test('no box alert once box is in', () => assert.deepEqual(keys(db('2026-01-01',
 test('due day 31 and overdue day 33', () => { assert.deepEqual(keys(db('2026-01-01'), '2026-02-01'), ['due']); assert.deepEqual(keys(db('2026-01-01'), '2026-02-03'), ['late']); });
 test('finished breedings are silent', () => assert.deepEqual(keys(db('2026-01-01', { status: 'kindled' }), '2026-02-01'), []));
 test('weaning at 6 weeks', () => { const d = db('2026-01-01'); d.breedings = []; d.litters = [{ id: 'l', doe: 'd', date: '2026-01-01', males: 2, females: 3, unknown: 0, dead: 0 }]; assert.deepEqual(keys(d, '2026-02-12'), ['wean']); });
+const litterDb = (extra = {}, breedings = []) => ({ rabbits: [{ id: 'd', name: 'Clover' }, { id: 'b', name: 'Thor' }], breedings, litters: [{ id: 'l', doe: 'd', date: '2026-01-01', males: 2, females: 3, unknown: 0, dead: 0, ...extra }] });
+test('rebreed 7 days after weaning (day 49)', () => assert.deepEqual(keys(litterDb(), '2026-02-19'), ['rebreed']));
+test('no rebreed alert if doe already re-bred', () => assert.deepEqual(keys(litterDb({}, [{ id: 'n', doe: 'd', buck: 'b', date: '2026-02-10', status: 'pending' }]), '2026-02-19').filter(k => k === 'rebreed'), []));
+test('rebreed can be switched off', () => { const d = litterDb(); d.settings = { rebreed: 0 }; assert.deepEqual(keys(d, '2026-02-19'), []); });
+test('weaned litters get no wean alert', () => assert.deepEqual(keys(litterDb({ weaned: true }), '2026-02-12'), []));
+test('custom timings are honoured', () => { const d = db('2026-01-01'); d.settings = { gestation: 32, nestBox: 29, palpate: 12 }; assert.deepEqual(keys(d, '2026-01-30'), ['box']); assert.deepEqual(keys(d, '2026-01-13'), ['palpate']); });

@@ -34,7 +34,16 @@ on the iPhone home screen.
 ## Alerts (sent once, at your chosen hour)
 
 Day 14 palpate · day 26 nest box coming up · day 28 put nest box in · day 31 kindling due ·
-day 33 overdue · 6 weeks after birth: wean. Timings are constants in `alerts.js` and `public/app.js`.
+day 33 overdue · 42 days after birth: wean · 7 days after weaning: rebreed the doe (skipped if she
+has already been bred, or if the litter is marked weaned for the wean alert).
+
+All of these day counts can be changed in the app under **Alerts → Timings**.
+
+## Photos and backup
+
+Rabbits and litters can have photos (resized on the phone, stored in `data/photos`).
+**Alerts → Backup** downloads one JSON file with everything including photos, and restores from it.
+A safety copy of the replaced data is written to `data/pre-restore.json` on every restore.
 
 `npm test` runs the alert-rule tests.
 

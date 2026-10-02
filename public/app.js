@@ -1,5 +1,6 @@
 // ---------- config & helpers ----------
-const GEST = 31, BOX = 28, PALP = 14, WEAN = 42;
+const DEF = { gestation: 31, nestBox: 28, palpate: 14, wean: 42, rebreed: 7 };
+const T = () => ({ ...DEF, ...(S.settings || {}) });
 const $ = s => document.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -22,6 +23,7 @@ const I = {
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
   bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.700 21a2 2 0 01-3.400 0"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.300-4.300"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>',
   warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.300 3.900L1.800 18a2 2 0 001.700 3h17a2 2 0 001.700-3L13.700 3.900a2 2 0 00-3.400 0z"/></svg>',
 };
 
@@ -59,14 +61,68 @@ function events() {
   pending().forEach(b => {
     const who = `${nm(b.doe)} × ${nm(b.buck)}`;
     const add = (n, kind, label, icon) => out.push({ date: addDays(b.date, n), kind, label, who, icon, b });
-    if (!b.checked && diff(t, b.date) <= PALP + 2) add(PALP, 'check', 'Palpate', I.search);
-    if (!b.boxIn) add(BOX, 'box', 'Nest box in', I.box);
-    add(GEST, 'due', 'Kindling due', I.baby);
+    if (!b.checked && diff(t, b.date) <= T().palpate + 2) add(T().palpate, 'check', 'Palpate', I.search);
+    if (!b.boxIn) add(T().nestBox, 'box', 'Nest box in', I.box);
+    add(T().gestation, 'due', 'Kindling due', I.baby);
   });
-  S.litters.forEach(l => { const d = addDays(l.date, WEAN); if (diff(t, d) <= 3 && !l.weaned) out.push({ date: d, kind: 'wean', label: 'Wean litter', who: nm(l.doe), icon: I.rabbit, l }); });
+  S.litters.forEach(l => {
+    const age = diff(t, l.date), cfg = T();
+    if (!l.weaned && age >= cfg.wean - 3 && age <= cfg.wean + 60) out.push({ date: addDays(l.date, cfg.wean), kind: 'wean', label: 'Wean litter', who: nm(l.doe), icon: I.rabbit, l });
+    const rd = cfg.wean + cfg.rebreed, bredSince = S.breedings.some(b => b.doe === l.doe && b.date >= l.date);
+    if (cfg.rebreed > 0 && !bredSince && age >= rd - 3 && age <= rd + 60) out.push({ date: addDays(l.date, rd), kind: 'rebreed', label: 'Rebreed', who: nm(l.doe), icon: I.heart, l });
+  });
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 const chipFor = d => { const n = diff(d, today()); return `<span class="chip ${n < 0 ? 'red' : n <= 2 ? 'amber' : ''}">${rel(n)}</span>`; };
+
+// ---------- photos ----------
+const photoCache = new Map();
+async function photoUrl(id) {
+  if (photoCache.has(id)) return photoCache.get(id);
+  const r = await api('/api/photos/' + id); if (!r.ok) throw new Error('missing');
+  const u = URL.createObjectURL(await r.blob()); photoCache.set(id, u); return u;
+}
+function hydrate() {
+  document.querySelectorAll('[data-ph]').forEach(async el => {
+    try { const u = await photoUrl(el.dataset.ph); el.style.backgroundImage = `url(${u})`; el.classList.add('has'); } catch {}
+  });
+}
+const av = (cls, icon, photos) => `<div class="avatar bg-${cls}" ${photos && photos[0] ? `data-ph="${photos[0]}"` : ''}>${icon}</div>`;
+const thumbs = ids => ids && ids.length ? `<div class="thumbs">${ids.map(id => `<div class="thumb" data-ph="${id}" onclick="event.stopPropagation();lightbox('${id}')"></div>`).join('')}</div>` : '';
+async function lightbox(id) {
+  try { const u = await photoUrl(id); $('#sheet-root').insertAdjacentHTML('beforeend', `<div class="lb" onclick="this.remove()"><img src="${u}" alt=""></div>`); } catch {}
+}
+// A sheet's photo edits are held in a draft: uploads are removed again on cancel, removals only happen on save.
+let D = { orig: [], photos: [], added: [] };
+const draftStart = ids => { D = { orig: [...(ids || [])], photos: [...(ids || [])], added: [] }; };
+const stripHtml = () => `<div class="strip">${D.photos.map(id => `<div class="thumb big" data-ph="${id}" onclick="lightbox('${id}')"><button type="button" class="x" onclick="event.stopPropagation();dropPhoto('${id}')">×</button></div>`).join('')}
+  <label class="thumb big add">${I.camera}<input type="file" accept="image/*" hidden onchange="addPhoto(this)"></label></div>`;
+function refreshStrip() { $('#strip').innerHTML = stripHtml(); hydrate(); }
+function resizeJpeg(file, max = 1280) {
+  return new Promise((ok, fail) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      c.toBlob(b => b ? ok(b) : fail(new Error('encode')), 'image/jpeg', 0.82);
+    };
+    img.onerror = () => fail(new Error('decode')); img.src = url;
+  });
+}
+async function addPhoto(input) {
+  const f = input.files[0]; if (!f) return;
+  try {
+    toast('Uploading photo…');
+    const blob = await resizeJpeg(f);
+    const r = await fetch('/api/photos', { method: 'POST', body: blob, headers: { 'Content-Type': 'image/jpeg', ...(token ? { Authorization: 'Bearer ' + token } : {}) } });
+    if (!r.ok) throw new Error((await r.json()).error);
+    const { id } = await r.json(); D.photos.push(id); D.added.push(id); refreshStrip();
+  } catch (e) { toast("Couldn't add that photo"); }
+}
+const dropPhoto = id => { D.photos = D.photos.filter(x => x !== id); refreshStrip(); };
+const delPhotos = ids => Promise.all((ids || []).map(id => api('/api/photos/' + id, { method: 'DELETE' }).catch(() => {})));
+const settlePhotos = () => delPhotos(D.orig.filter(id => !D.photos.includes(id)));   // on save
 
 // ---------- views ----------
 function render() {
@@ -76,6 +132,7 @@ function render() {
   const view = { today: todayView, breeding: breedingView, litters: littersView, rabbits: rabbitsView, settings: settingsView }[tab]();
   const fab = { breeding: 'newBreeding', rabbits: 'rabbitSheet' }[tab];
   app.innerHTML = view + (fab ? `<button class="fab" onclick="${fab}()" aria-label="Add">${I.plus}</button>` : '') + tabBar();
+  hydrate();
 }
 const tabBar = () => `<nav class="tabs"><div class="tabs-inner">${[
   ['today', 'Today', I.home], ['breeding', 'Breeding', I.heart], ['litters', 'Litters', I.baby], ['rabbits', 'Rabbits', I.rabbit], ['settings', 'Alerts', I.bell],
@@ -93,7 +150,8 @@ function todayView() {
   h += '<div class="section">Up next</div>';
   h += ev.length ? ev.slice(0, 12).map(e => {
     const late = diff(e.date, t) < 0;
-    return `<div class="card"><div class="row"><div class="avatar bg-${late ? 'late' : e.kind}">${e.icon}</div>
+    const tap = e.kind === 'wean' ? `litterSheet('${e.l.id}')` : e.kind === 'rebreed' ? `newBreeding('${e.l.doe}')` : `go('breeding')`;
+    return `<div class="card tap" onclick="${tap}"><div class="row"><div class="avatar bg-${late ? 'late' : e.kind}">${e.icon}</div>
       <div class="grow"><div class="name">${e.label}</div><div class="sub">${esc(e.who)} · ${fmt(e.date)}</div></div>
       <div class="right">${chipFor(e.date)}</div></div></div>`;
   }).join('') : empty(I.heart, 'Nothing scheduled.<br>Log a breeding to start the countdown.');
@@ -103,15 +161,15 @@ function todayView() {
 }
 
 function breedingCard(b) {
-  const t = today(), age = Math.max(0, diff(t, b.date)), pct = Math.min(100, age / GEST * 100);
-  const due = addDays(b.date, GEST), box = addDays(b.date, BOX);
+  const t = today(), age = Math.max(0, diff(t, b.date)), pct = Math.min(100, age / T().gestation * 100);
+  const due = addDays(b.date, T().gestation), box = addDays(b.date, T().nestBox);
   const over = diff(t, due) > 0;
   let h = `<div class="card"><div class="row"><div class="avatar bg-doe">${I.rabbit}</div>
     <div class="grow"><div class="name">${esc(nm(b.doe))} × ${esc(nm(b.buck))}</div><div class="sub">Bred ${fmt(b.date)} · day ${age}</div></div>
     <div class="right">${b.status === 'pending' ? `<span class="chip ${over ? 'red' : 'green'}">${over ? 'Overdue' : 'Expecting'}</span>` : b.status === 'kindled' ? '<span class="chip green">Kindled</span>' : '<span class="chip">Not pregnant</span>'}</div></div>`;
   if (b.status === 'pending') {
-    h += `<div class="bar"><i style="width:${pct}%"></i><u style="left:${BOX / GEST * 100}%"></u></div>
-      <div class="bar-labels"><span>Bred</span><span>Box day ${BOX} · ${fmt(box)}${b.boxIn ? ' ✓' : ''}</span><span>Due ${fmt(due)}</span></div>
+    h += `<div class="bar"><i style="width:${pct}%"></i><u style="left:${T().nestBox / T().gestation * 100}%"></u></div>
+      <div class="bar-labels"><span>Bred</span><span>Box day ${T().nestBox} · ${fmt(box)}${b.boxIn ? ' ✓' : ''}</span><span>Due ${fmt(due)}</span></div>
       <div class="actions">${b.boxIn ? '' : `<button class="btn soft sm" onclick="setFlag('${b.id}','boxIn')">${I.box.replace('<svg', '<svg width="16" height="16" style="vertical-align:-3px;margin-right:4px"')}Nest box in</button>`}
       ${b.checked ? '' : `<button class="btn gray sm" onclick="setFlag('${b.id}','checked')">Palpated</button>`}
       <button class="btn sm" onclick="litterSheet(null,'${b.id}')">Kindled</button>
@@ -138,11 +196,11 @@ function littersView() {
   h += `<div class="card"><div class="sub">All time</div><div class="kit"><span class="m"><b>${m}</b>Bucks</span><span class="f"><b>${f}</b>Does</span><span><b>${u}</b>Unsexed</span><span><b>${d}</b>Lost</span></div></div>`;
   h += list.map(l => {
     const b = byId(S.breedings, l.breeding), age = diff(today(), l.date), live = l.males + l.females + l.unknown;
-    return `<div class="card" onclick="litterSheet('${l.id}')"><div class="row"><div class="avatar bg-due">${I.baby}</div>
+    return `<div class="card" onclick="litterSheet('${l.id}')"><div class="row">${av('due', I.baby, l.photos)}
       <div class="grow"><div class="name">${esc(nm(l.doe))}${b ? ' × ' + esc(nm(b.buck)) : ''}</div><div class="sub">Born ${fmtY(l.date)} · ${age} days old</div></div>
       <div class="right"><span class="chip green">${live} kits</span></div></div>
       <div class="kit"><span class="m"><b>${l.males}</b>Bucks</span><span class="f"><b>${l.females}</b>Does</span>${l.unknown ? `<span><b>${l.unknown}</b>Unsexed</span>` : ''}${l.dead ? `<span><b>${l.dead}</b>Lost</span>` : ''}</div>
-      ${l.notes ? `<div class="sub" style="margin-top:10px">${esc(l.notes)}</div>` : ''}</div>`;
+      ${thumbs(l.photos)}${l.weaned ? '<div class="sub" style="margin-top:8px">✓ Weaned</div>' : ''}${l.notes ? `<div class="sub" style="margin-top:10px">${esc(l.notes)}</div>` : ''}</div>`;
   }).join('');
   return h;
 }
@@ -155,7 +213,7 @@ function rabbitsView() {
     const g = list.filter(r => r.sex === sex);
     if (g.length) h += `<div class="section">${label}</div>` + g.map(r => {
       const n = S.litters.filter(l => l.doe === r.id).length, bred = S.breedings.filter(b => b[sex] === r.id).length;
-      return `<div class="card" onclick="rabbitSheet('${r.id}')"><div class="row"><div class="avatar bg-${sex}">${I.rabbit}</div>
+      return `<div class="card" onclick="rabbitSheet('${r.id}')"><div class="row">${av(sex, I.rabbit, r.photos)}
         <div class="grow"><div class="name">${esc(r.name)}</div><div class="sub">${esc(r.breed || (sex === 'doe' ? 'Doe' : 'Buck'))}${r.dob ? ' · ' + ageStr(r.dob) : ''}</div></div>
         <div class="right sub">${bred} breeding${bred === 1 ? '' : 's'}${sex === 'doe' ? `<br>${n} litter${n === 1 ? '' : 's'}` : ''}</div></div></div>`;
     }).join('');
@@ -179,10 +237,15 @@ function settingsView() {
   <button class="btn block" onclick="testAlert()">Send test notification</button>
   <div class="section">Set up on iPhone</div>
   <div class="card sub" style="line-height:1.6">1. Install the <b>ntfy</b> app from the App Store.<br>2. Tap <b>+</b> and subscribe to the same topic you entered above.<br>3. Pick a long, random topic name — anyone who knows it can read your alerts.<br>4. Tap “Send test notification” to confirm.</div>
+  <div class="section">Timings</div>
+  <div class="group">${TIMINGS.map(([k, label, min, max]) => `<div class="field"><label style="flex:1">${label}</label>${timingStepper(k, min, max)}</div>`).join('')}</div>
+  <div class="hint">Days counted from the breeding date, or from birth for weaning. Changing these moves the dates on current breedings too.</div>
   <div class="section">You'll be notified</div>
-  <div class="card sub" style="line-height:1.7">Day ${PALP} · palpate<br>Day ${BOX - 2} · nest box coming up<br>Day ${BOX} · put the nest box in<br>Day ${GEST} · kindling due<br>Day ${GEST + 2} · overdue warning<br>Week ${WEAN / 7} after birth · time to wean</div>
-  <div class="section">Data</div>
-  <div class="actions" style="margin-top:0"><button class="btn gray" onclick="exportData()">Export backup</button>${token ? '<button class="btn danger" onclick="logout()">Sign out</button>' : ''}</div>`;
+  <div class="card sub" style="line-height:1.7">Day ${T().palpate} · palpate<br>Day ${T().nestBox - 2} · nest box coming up<br>Day ${T().nestBox} · put the nest box in<br>Day ${T().gestation} · kindling due<br>Day ${T().gestation + 2} · overdue warning<br>${T().wean} days after birth · time to wean<br>${T().rebreed ? `${T().rebreed} days after weaning · rebreed the doe` : 'Rebreed reminder is off'}</div>
+  <div class="section">Backup</div>
+  <div class="card sub" style="line-height:1.5">Everything — rabbits, breedings, litters, photos and settings — in one file.</div>
+  <div class="actions" style="margin-top:0"><button class="btn" onclick="downloadBackup()">Download backup</button><button class="btn gray" onclick="$('#restore-file').click()">Restore from file</button><input id="restore-file" type="file" accept=".json,application/json" hidden onchange="restoreBackup(this)"></div>
+  ${token ? '<div class="actions"><button class="btn danger" onclick="logout()">Sign out</button></div>' : ''}`;
 }
 
 function loginView() {
@@ -196,19 +259,21 @@ function logout() { localStorage.removeItem('warren.token'); token = ''; needLog
 // ---------- sheets ----------
 function openSheet(title, body) {
   $('#sheet-root').innerHTML = `<div class="scrim" onclick="closeSheet()"></div><div class="sheet"><div class="grab"></div><h2>${title}</h2>${body}</div>`;
+  hydrate();
 }
-function closeSheet() { $('#sheet-root').innerHTML = ''; }
+function closeSheet() { delPhotos(D.added.filter(id => !D.orig.includes(id))); D = { orig: [], photos: [], added: [] }; $('#sheet-root').innerHTML = ''; }
+const closeSaved = () => { D.added = []; D = { orig: [], photos: [], added: [] }; $('#sheet-root').innerHTML = ''; };
 const val = id => $('#' + id).value;
 const stepper = (id, v) => `<div class="stepper"><button type="button" onclick="step('${id}',-1)">−</button><output id="${id}">${v}</output><button type="button" onclick="step('${id}',1)">+</button></div>`;
 function step(id, d) { const o = $('#' + id); o.textContent = Math.max(0, +o.textContent + d); }
 const rabbitOpts = (sex, sel) => S.rabbits.filter(r => r.sex === sex).map(r => `<option value="${r.id}" ${r.id === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
 
-function newBreeding() {
+function newBreeding(doeId) {
   if (!S.rabbits.some(r => r.sex === 'doe') || !S.rabbits.some(r => r.sex === 'buck')) {
     toast('Add at least one doe and one buck first'); return go('rabbits');
   }
   openSheet('New breeding', `<div class="group">
-    <div class="field"><label>Doe</label><select id="b-doe">${rabbitOpts('doe')}</select></div>
+    <div class="field"><label>Doe</label><select id="b-doe">${rabbitOpts('doe', doeId)}</select></div>
     <div class="field"><label>Buck</label><select id="b-buck">${rabbitOpts('buck')}</select></div>
     <div class="field"><label>Date bred</label><input id="b-date" type="date" value="${today()}" oninput="previewDates()"></div></div>
     <div class="hint" id="b-prev"></div><button class="btn block" onclick="saveBreeding()">Save breeding</button>`);
@@ -216,7 +281,7 @@ function newBreeding() {
 }
 function previewDates() {
   const d = val('b-date'); if (!d) return;
-  $('#b-prev').textContent = `Nest box on ${fmtY(addDays(d, BOX))} · due ${fmtY(addDays(d, GEST))}`;
+  $('#b-prev').textContent = `Nest box on ${fmtY(addDays(d, T().nestBox))} · due ${fmtY(addDays(d, T().gestation))}`;
 }
 function saveBreeding() {
   if (!val('b-date')) return;
@@ -228,46 +293,54 @@ function notPregnant(id) { if (confirm('Mark as not pregnant? Reminders for this
 
 function litterSheet(id, breedingId) {
   const l = id ? byId(S.litters, id) : { date: today(), males: 0, females: 0, unknown: 0, dead: 0, notes: '', breeding: breedingId, doe: byId(S.breedings, breedingId).doe };
+  draftStart(l.photos);
   openSheet(`${id ? 'Edit' : 'New'} litter · ${esc(nm(l.doe))}`, `<div class="group">
     <div class="field"><label>Born</label><input id="l-date" type="date" value="${l.date}"></div>
     <div class="field"><label>Bucks ♂</label>${stepper('l-m', l.males)}</div>
     <div class="field"><label>Does ♀</label>${stepper('l-f', l.females)}</div>
     <div class="field"><label>Unsexed</label>${stepper('l-u', l.unknown)}</div>
     <div class="field"><label>Stillborn / lost</label>${stepper('l-d', l.dead)}</div>
+    <div class="field"><label>Weaned</label><div class="seg" style="flex:0 0 120px"><button type="button" id="l-w1" class="${l.weaned ? 'on' : ''}" onclick="pickWeaned(true)">Yes</button><button type="button" id="l-w0" class="${!l.weaned ? 'on' : ''}" onclick="pickWeaned(false)">No</button></div></div>
     <div class="field"><textarea id="l-n" rows="2" placeholder="Notes">${esc(l.notes)}</textarea></div></div>
+    <div class="section" style="margin-top:0">Photos</div><div id="strip">${stripHtml()}</div>
     <button class="btn block" onclick="saveLitter('${id || ''}','${l.breeding || ''}','${l.doe}')">Save litter</button>
     ${id ? `<div class="actions"><button class="btn danger block" onclick="delLitter('${id}')">Delete litter</button></div>` : ''}`);
 }
 function saveLitter(id, breeding, doe) {
-  const data = { date: val('l-date'), males: +$('#l-m').textContent, females: +$('#l-f').textContent, unknown: +$('#l-u').textContent, dead: +$('#l-d').textContent, notes: val('l-n').trim() };
+  const data = { date: val('l-date'), males: +$('#l-m').textContent, females: +$('#l-f').textContent, unknown: +$('#l-u').textContent, dead: +$('#l-d').textContent, notes: val('l-n').trim(), weaned: $('#l-w1').classList.contains('on'), photos: [...D.photos] };
   if (!data.date) return;
+  settlePhotos();
   if (id) Object.assign(byId(S.litters, id), data);
   else { S.litters.push({ id: uid(), breeding, doe, ...data }); const b = byId(S.breedings, breeding); if (b) b.status = 'kindled'; }
-  closeSheet(); tab = 'litters'; save(); toast('Litter saved');
+  closeSaved(); tab = 'litters'; save(); toast('Litter saved');
 }
-function delLitter(id) { if (confirm('Delete this litter?')) { S.litters = S.litters.filter(l => l.id !== id); closeSheet(); save(); } }
+function pickWeaned(v) { $('#l-w1').classList.toggle('on', v); $('#l-w0').classList.toggle('on', !v); }
+function delLitter(id) { if (confirm('Delete this litter?')) { delPhotos(byId(S.litters, id).photos); S.litters = S.litters.filter(l => l.id !== id); closeSaved(); save(); } }
 
 function rabbitSheet(id) {
   const r = id ? byId(S.rabbits, id) : { name: '', sex: 'doe', breed: '', dob: '', notes: '' };
+  draftStart(r.photos);
   openSheet(id ? 'Edit rabbit' : 'New rabbit', `<div class="group">
     <div class="field"><label>Name / ID</label><input id="r-name" value="${esc(r.name)}" placeholder="Clover"></div>
     <div class="field"><label>Sex</label><div class="seg"><button id="r-doe" class="${r.sex === 'doe' ? 'on' : ''}" onclick="pickSex('doe')">Doe</button><button id="r-buck" class="${r.sex === 'buck' ? 'on' : ''}" onclick="pickSex('buck')">Buck</button></div></div>
     <div class="field"><label>Breed</label><input id="r-breed" value="${esc(r.breed)}" placeholder="Optional"></div>
     <div class="field"><label>Born</label><input id="r-dob" type="date" value="${r.dob || ''}"></div></div>
+    <div class="section" style="margin-top:0">Photos</div><div id="strip">${stripHtml()}</div>
     <button class="btn block" onclick="saveRabbit('${id || ''}')">Save</button>
     ${id ? `<div class="actions"><button class="btn danger block" onclick="delRabbit('${id}')">Delete rabbit</button></div>` : ''}`);
 }
 function pickSex(s) { $('#r-doe').classList.toggle('on', s === 'doe'); $('#r-buck').classList.toggle('on', s === 'buck'); }
 function saveRabbit(id) {
   const name = val('r-name').trim(); if (!name) return toast('Give the rabbit a name');
-  const data = { name, sex: $('#r-buck').classList.contains('on') ? 'buck' : 'doe', breed: val('r-breed').trim(), dob: val('r-dob') };
+  const data = { name, sex: $('#r-buck').classList.contains('on') ? 'buck' : 'doe', breed: val('r-breed').trim(), dob: val('r-dob'), photos: [...D.photos] };
+  settlePhotos();
   if (id) Object.assign(byId(S.rabbits, id), data); else S.rabbits.push({ id: uid(), ...data });
-  closeSheet(); save();
+  closeSaved(); save();
 }
 function delRabbit(id) {
   const used = S.breedings.some(b => b.doe === id || b.buck === id);
   if (!confirm(used ? 'This rabbit appears in breeding records. Delete anyway?' : 'Delete this rabbit?')) return;
-  S.rabbits = S.rabbits.filter(r => r.id !== id); closeSheet(); save();
+  delPhotos(byId(S.rabbits, id).photos); S.rabbits = S.rabbits.filter(r => r.id !== id); closeSaved(); save();
 }
 
 // ---------- settings actions ----------
@@ -280,10 +353,31 @@ async function testAlert() {
   const r = await api('/api/test-alert', { method: 'POST' }).catch(() => null);
   if (r && r.ok) toast('Sent — check your phone'); else toast(r ? ((await r.json()).error || 'Failed') : 'Server unreachable');
 }
-function exportData() {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }));
-  a.download = `warren-${today()}.json`; a.click();
+const TIMINGS = [['palpate', 'Palpation check (day)', 7, 25], ['nestBox', 'Nest box in (day)', 20, 33], ['gestation', 'Kindling due (day)', 28, 35], ['wean', 'Wean after birth (days)', 21, 90], ['rebreed', 'Rebreed after weaning (0 = off)', 0, 60]];
+const timingStepper = (k, min, max) => `<div class="stepper"><button type="button" onclick="setTiming('${k}',-1,${min},${max})">−</button><output>${T()[k]}</output><button type="button" onclick="setTiming('${k}',1,${min},${max})">+</button></div>`;
+function setTiming(k, d, min, max) {
+  const t = T(), v = Math.min(max, Math.max(min, t[k] + d));
+  const next = { ...t, [k]: v };
+  if (next.palpate >= next.nestBox || next.nestBox >= next.gestation) return toast('Order must be palpation, then nest box, then due date');
+  setSetting(k, v);
+}
+
+async function downloadBackup() {
+  try {
+    const r = await api('/api/backup'); if (!r.ok) throw 0;
+    const blob = await r.blob(), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `warren-backup-${today()}.json`; document.body.appendChild(a); a.click(); a.remove();
+    toast('Backup downloaded');
+  } catch { toast("Couldn't create the backup"); }
+}
+async function restoreBackup(input) {
+  const f = input.files[0]; input.value = ''; if (!f) return;
+  if (!confirm('Replace ALL current data with this backup? A safety copy of the current data is kept on the server as pre-restore.json.')) return;
+  try {
+    const r = await api('/api/restore', { method: 'POST', body: await f.text() });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error);
+    photoCache.clear(); await load(); toast('Backup restored');
+  } catch (e) { toast(e.message || "Couldn't restore"); }
 }
 
 let toastTimer;

@@ -3,7 +3,7 @@ const DAY = 864e5;
 const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 const diffDays = (a, b) => Math.round((parse(a) - parse(b)) / DAY);
 
-const DEFAULTS = { gestation: 31, nestBox: 28, palpate: 14, wean: 42 };
+const DEFAULTS = { gestation: 31, nestBox: 28, palpate: 14, wean: 42, rebreed: 7 };
 
 function dueAlerts(db, today) {
   const s = Object.assign({}, DEFAULTS, db.settings || {});
@@ -30,11 +30,16 @@ function dueAlerts(db, today) {
   }
 
   for (const l of db.litters) {
-    const age = diffDays(today, l.date);
-    if (age >= s.wean && age <= s.wean + 2) {
-      const doe = name(l.doe);
-      const live = l.males + l.females + l.unknown;
-      add(`l:${l.id}:wean`, `Weaning time: ${doe}'s litter`, `Litter is ${s.wean / 7} weeks old (${live} kits, ${l.males} bucks / ${l.females} does). Time to wean and sex-separate.`, 'rabbit,tada', 3);
+    const age = diffDays(today, l.date), doe = name(l.doe);
+    const live = l.males + l.females + l.unknown;
+    if (!l.weaned && age >= s.wean && age <= s.wean + 2) {
+      add(`l:${l.id}:wean`, `Weaning time: ${doe}'s litter`, `Litter is ${age} days old (${live} kits, ${l.males} bucks / ${l.females} does). Time to wean and separate by sex.`, 'rabbit,tada', 3);
+    }
+    // Rebreed N days after weaning, unless the doe has already been bred since this litter.
+    const rebreedDay = s.wean + s.rebreed;
+    const bredSince = db.breedings.some(b => b.doe === l.doe && b.date >= l.date);
+    if (s.rebreed > 0 && !bredSince && age >= rebreedDay && age <= rebreedDay + 2) {
+      add(`l:${l.id}:rebreed`, `Rebreed ${doe}?`, `${doe}'s litter was weaned ${s.rebreed} days ago. Time to plan her next breeding.`, 'rabbit,heart', 3);
     }
   }
   return out;
