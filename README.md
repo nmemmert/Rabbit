@@ -65,3 +65,32 @@ A GitHub Action (`.github/workflows/docker.yml`) builds a multi-arch image to
 4. On the iPhone, open that address in Safari → Share → Add to Home Screen. Over plain HTTP on your LAN this works as a home-screen app; reach it away from home with Tailscale or a reverse proxy with HTTPS.
 
 The server only needs outbound internet access to reach ntfy.sh, so alerts work without exposing anything publicly.
+
+## Updating
+
+Every push to `master` rebuilds `ghcr.io/nmemmert/rabbit:latest`. On ZimaOS, wait for the **Build container
+image** run to go green (repo → Actions), then update or restart the Warren app so it pulls the new image.
+Your data lives in the mounted `/data` folder, so it survives updates. Download a backup first if you like
+(**Alerts → Backup**).
+
+## Troubleshooting
+
+| Problem | Check |
+| --- | --- |
+| Test notification fails | Topic is filled in, and the server can reach the ntfy server (default `https://ntfy.sh`, changeable on the Alerts tab, so a self-hosted ntfy works too). |
+| Alerts arrive at the wrong time | `TZ` is set to your timezone and **Send at** is the hour you want. |
+| Same alert never repeats / missed alert | Each alert is sent once per breeding or litter. If the server was off, it catches up for up to 2 days after the due day. |
+| "Couldn't reach the server" | The phone can reach the server address. Changes are saved on the server, not just on the phone. |
+| Forgot the password | Change `APP_PASSWORD` in the container settings and restart; data is not affected. |
+| ZimaOS can't pull the image | The `rabbit` package on GitHub is set to **Public**. |
+
+## Project layout
+
+| Path | What it is |
+| --- | --- |
+| `server.js` | HTTP server, JSON storage, photo storage, backup/restore, daily ntfy scheduler. No dependencies. |
+| `alerts.js` | Pure rules for which alerts are due on a given day (covered by `test-alerts.js`). |
+| `public/` | The web app: `index.html`, `app.js`, `style.css`, service worker, manifest, icons. |
+| `Dockerfile`, `docker-compose.yml` | Container image and the ZimaOS/CasaOS app definition. |
+| `.github/workflows/docker.yml` | Runs the tests and builds the multi-arch image. |
+
